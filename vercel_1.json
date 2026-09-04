@@ -1,0 +1,9 @@
+{
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/calculator",
+      "destination": "/calculator/index.html"
+    }
+  ]
+}
