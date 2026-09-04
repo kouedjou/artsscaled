@@ -1,2 +1,2 @@
 # artsscaled
-Arts Scaled - Pricing Calculator
+https://www.artsscaled.com
