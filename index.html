@@ -120,6 +120,23 @@ footer a{font-weight:500;text-decoration:underline}
 .modal-box ul{padding-left:18px;margin-top:6px}
 .modal-close{position:absolute;top:14px;right:16px;background:#000;color:#fff;border:none;border-radius:999px;width:32px;height:32px;cursor:pointer;font-size:16px;line-height:1}
 
+
+/* V11: Replace Reset with Copy + Clear - always visible action */
+.calc-actions{margin-top:20px;display:flex;flex-direction:column;gap:10px}
+.copy-btn{width:100%;background:#000;color:#fff;border:none;border-radius:999px;height:48px;font-size:14px;font-weight:600;cursor:pointer}
+.copy-btn:hover{background:#1a1a1a}
+.copy-btn.copied{background:#16a34a}
+.clear-row{display:flex;justify-content:center;gap:18px;flex-wrap:wrap}
+.clear-row button{background:none;border:none;font-size:12px;color:#737373;text-decoration:underline;cursor:pointer;padding:0}
+.clear-row button:hover{color:#000}
+
+
+/* V12: Calculator currency selector */
+.calc-currency{margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid #e5e5e5;border-radius:16px;background:#fafafa}
+.calc-currency label{font-size:12px;font-weight:600;color:#000}
+.calc-currency select{border:1px solid #e5e5e5;background:#fff;border-radius:999px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;max-width:190px}
+.calc-currency .hint{font-size:11px;color:#737373;margin-top:4px}
+
 </style>
 </head>
 <body>
@@ -134,6 +151,13 @@ footer a{font-weight:500;text-decoration:underline}
 <div class="layout">
 <!-- CALCULATOR -->
 <section class="card" aria-label="Art pricing calculator">
+<div class="calc-currency">
+<div>
+<label for="calcCurrencySelect">Pricing currency</label>
+<div class="hint">This also sets your donation currency</div>
+</div>
+<select id="calcCurrencySelect" aria-label="Choose pricing currency"></select>
+</div>
 <div class="formula">
 <div class="formula-label"><i></i><span>Formula</span></div>
 <p>Base = Materials + (Hours × Rate)</p>
@@ -142,8 +166,8 @@ footer a{font-weight:500;text-decoration:underline}
 </div>
 
 <div class="field">
-<label><span>Materials Cost</span><span>€</span></label>
-<div class="input-wrap"><span>€</span><input id="materials" type="text" inputmode="decimal" value="42" placeholder="0"></div>
+<label><span>Materials Cost</span><span id="materialsSymbolLabel">€</span></label>
+<div class="input-wrap"><span id="materialsSymbol">€</span><input id="materials" type="text" inputmode="decimal" value="42" placeholder="0"></div>
 </div>
 
 <div class="field">
@@ -152,8 +176,8 @@ footer a{font-weight:500;text-decoration:underline}
 </div>
 
 <div class="field">
-<label><span>Hourly Rate</span><span>€ / hour</span></label>
-<div class="input-wrap"><span>€</span><input id="rate" type="text" inputmode="decimal" value="35" placeholder="0"></div>
+<label><span>Hourly Rate</span><span id="rateSymbolLabel">€ / hour</span></label>
+<div class="input-wrap"><span id="rateSymbol">€</span><input id="rate" type="text" inputmode="decimal" value="35" placeholder="0"></div>
 </div>
 
 <div class="field">
@@ -176,7 +200,13 @@ footer a{font-weight:500;text-decoration:underline}
 <div class="row"><span>With profit (×1.40)</span><span id="profitOut">€450.80</span></div>
 <div class="row final"><span>Final Price</span><span id="finalOut">€631.12</span></div>
 </div>
-<button class="reset" id="resetBtn">Reset calculator</button>
+<div class="calc-actions">
+<button type="button" class="copy-btn" id="copyBtn" onclick="copyPrice(event)">Copy final price</button>
+<div class="clear-row">
+<button type="button" id="clearBtn" onclick="clearCalculator(event)">Clear • New artwork</button>
+<button type="button" id="exampleBtn" onclick="loadExample(event)">Load example</button>
+</div>
+</div>
 </section>
 
 <!-- DONATION -->
@@ -313,7 +343,85 @@ const finalOut = document.getElementById('finalOut');
 let currentMult = 1.4;
 
 function num(v){ const n = parseFloat(v); return isNaN(n) ? 0 : n; }
-function eur(v){ return new Intl.NumberFormat('en-IE',{style:'currency',currency:'EUR',maximumFractionDigits:2}).format(v); }
+// V12: Calculator currency - selectable, defaults to auto-detected, saved in browser
+const CALC_CURRENCIES = [
+  {code:'EUR', symbol:'€', name:'Euro'},
+  {code:'USD', symbol:'$', name:'US Dollar'},
+  {code:'GBP', symbol:'£', name:'British Pound'},
+  {code:'JPY', symbol:'¥', name:'Japanese Yen'},
+  {code:'CHF', symbol:'CHF ', name:'Swiss Franc'},
+  {code:'CAD', symbol:'$', name:'Canadian Dollar'},
+  {code:'AUD', symbol:'$', name:'Australian Dollar'},
+  {code:'NZD', symbol:'$', name:'New Zealand Dollar'},
+  {code:'SGD', symbol:'$', name:'Singapore Dollar'},
+  {code:'HKD', symbol:'$', name:'Hong Kong Dollar'},
+  {code:'SEK', symbol:'kr ', name:'Swedish Krona'},
+  {code:'NOK', symbol:'kr ', name:'Norwegian Krone'},
+  {code:'DKK', symbol:'kr ', name:'Danish Krone'},
+  {code:'PLN', symbol:'zł ', name:'Polish Zloty'},
+  {code:'CZK', symbol:'Kč ', name:'Czech Koruna'},
+  {code:'AED', symbol:'د.إ ', name:'UAE Dirham'},
+  {code:'ZAR', symbol:'R ', name:'South African Rand'},
+  {code:'MXN', symbol:'$', name:'Mexican Peso'},
+  {code:'BRL', symbol:'R$', name:'Brazilian Real'},
+  {code:'KRW', symbol:'₩', name:'South Korean Won'},
+  {code:'INR', symbol:'₹', name:'Indian Rupee'},
+  {code:'CNY', symbol:'¥', name:'Chinese Yuan'},
+];
+const ZERO_DECIMAL = ['JPY','KRW'];
+let calculatorCurrency = 'EUR';
+function getCalcCurrencyInfo(code){ return CALC_CURRENCIES.find(c=>c.code===code) || CALC_CURRENCIES[0]; }
+function formatMoney(v, code){
+  const c = code || calculatorCurrency;
+  const decimals = ZERO_DECIMAL.includes(c) ? 0 : 2;
+  try{ return new Intl.NumberFormat('en-US',{style:'currency',currency:c,maximumFractionDigits:decimals,minimumFractionDigits:decimals}).format(v); }
+  catch(e){ const info = getCalcCurrencyInfo(c); return info.symbol + v.toFixed(decimals); }
+}
+function eur(v){ return formatMoney(v, calculatorCurrency); }
+function updateCalcCurrencyUI(){
+  const info = getCalcCurrencyInfo(calculatorCurrency);
+  const ms = document.getElementById('materialsSymbol'); if(ms) ms.textContent = info.symbol.trim();
+  const msl = document.getElementById('materialsSymbolLabel'); if(msl) msl.textContent = info.symbol.trim();
+  const rs = document.getElementById('rateSymbol'); if(rs) rs.textContent = info.symbol.trim();
+  const rl = document.getElementById('rateSymbolLabel'); if(rl) rl.textContent = info.symbol.trim() + ' / hour';
+  const sel = document.getElementById('calcCurrencySelect'); if(sel && sel.value !== calculatorCurrency) sel.value = calculatorCurrency;
+}
+function syncDonationToCalcCurrency(){
+  // Donation follows the currency the user declared in the calculator
+  try{
+    donationCurrency = calculatorCurrency;
+    donationSymbol = CURRENCY_SYMBOLS[donationCurrency] || getCalcCurrencyInfo(donationCurrency).symbol || '€';
+    if(typeof renderDonation === 'function') renderDonation();
+  }catch(_){}
+}
+function setCalculatorCurrency(code){
+  if(!code) return;
+  calculatorCurrency = code;
+  try{ localStorage.setItem('artsScaled_calcCurrency', code); }catch(_){}
+  updateCalcCurrencyUI();
+  calc();
+  syncDonationToCalcCurrency();
+}
+function initCalcCurrencySelector(){
+  const sel = document.getElementById('calcCurrencySelect');
+  if(!sel) return;
+  sel.innerHTML = CALC_CURRENCIES.map(c=>`<option value="${c.code}">${c.symbol.trim()} ${c.code} — ${c.name}</option>`).join('');
+  // Saved choice wins, otherwise auto-detected (same detection as donation, timezone-first)
+  let saved = null;
+  try{ saved = localStorage.getItem('artsScaled_calcCurrency'); }catch(_){}
+  if(saved && CALC_CURRENCIES.some(c=>c.code===saved)){ calculatorCurrency = saved; }
+  else {
+    try{
+      const det = detectLocalCurrency ? detectLocalCurrency() : {code:'EUR'};
+      if(det && det.code && CALC_CURRENCIES.some(c=>c.code===det.code)) calculatorCurrency = det.code;
+    }catch(_){ calculatorCurrency = 'EUR'; }
+  }
+  sel.value = calculatorCurrency;
+  sel.addEventListener('change', ()=>{ setCalculatorCurrency(sel.value); });
+  updateCalcCurrencyUI();
+  // Donation follows the declared currency on load too
+  syncDonationToCalcCurrency();
+}
 
 function calc(){
   const base = num(materialsEl.value) + num(hoursEl.value) * num(rateEl.value);
@@ -341,22 +449,79 @@ document.querySelectorAll('#sizeGrid .size-btn').forEach(btn=>{
     calc();
   });
 });
-document.getElementById('resetBtn').addEventListener('click', ()=>{
-  materialsEl.value = 42; hoursEl.value = 8; rateEl.value = 35; profitEl.value = 40;
+// V11: Copy + Clear + Example - every button does something visible, even on first load
+function clearCalculator(e){
+  if(e && e.preventDefault) e.preventDefault();
+  materialsEl.value = '';
+  hoursEl.value = '';
+  rateEl.value = '';
+  profitEl.value = '40';
   document.querySelectorAll('#sizeGrid .size-btn').forEach(b=>b.classList.toggle('active', b.dataset.size==='medium'));
-  currentMult = 1.4; calc();
+  currentMult = 1.4;
+  calc();
+  try{ materialsEl.focus(); }catch(_){}
+  return false;
+}
+function loadExample(e){
+  if(e && e.preventDefault) e.preventDefault();
+  materialsEl.value = '42';
+  hoursEl.value = '8';
+  rateEl.value = '35';
+  profitEl.value = '40';
+  document.querySelectorAll('#sizeGrid .size-btn').forEach(b=>b.classList.toggle('active', b.dataset.size==='medium'));
+  currentMult = 1.4;
+  calc();
+  return false;
+}
+function copyPrice(e){
+  if(e && e.preventDefault) e.preventDefault();
+  const text = finalOut.textContent.trim();
+  const btn = document.getElementById('copyBtn');
+  function done(){
+    if(btn){ const old = btn.textContent; btn.textContent = 'Copied ✓'; btn.classList.add('copied'); setTimeout(()=>{ btn.textContent = 'Copy final price'; btn.classList.remove('copied'); }, 2000); }
+  }
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy()); }
+    else fallbackCopy();
+  }catch(_){ fallbackCopy(); }
+  function fallbackCopy(){
+    try{
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done();
+    }catch(_){ done(); }
+  }
+  return false;
+}
+window.clearCalculator = clearCalculator;
+window.loadExample = loadExample;
+window.copyPrice = copyPrice;
+// Keep old name working if anyone still calls it - now it loads the example, not blanks
+window.resetCalculator = loadExample;
+try{ const cb = document.getElementById('clearBtn'); if(cb) cb.addEventListener('click', clearCalculator); }catch(_){}
+try{ const eb = document.getElementById('exampleBtn'); if(eb) eb.addEventListener('click', loadExample); }catch(_){}
+try{ const pb = document.getElementById('copyBtn'); if(pb) pb.addEventListener('click', copyPrice); }catch(_){}
+document.addEventListener('click', function(e){
+  if(!e || !e.target || !e.target.closest) return;
+  if(e.target.closest('#clearBtn')) clearCalculator(e);
+  else if(e.target.closest('#exampleBtn')) loadExample(e);
+  else if(e.target.closest('#copyBtn')) copyPrice(e);
 });
 calc();
 
 // ---------- DONATION ----------
-const CURRENCY_SYMBOLS={USD:'$',GBP:'£',EUR:'€',CAD:'$',AUD:'$',CHF:'CHF ',NZD:'$',SGD:'$',HKD:'$',SEK:'kr ',NOK:'kr ',DKK:'kr ',PLN:'zł ',CZK:'Kč ',AED:'د.إ ',ZAR:'R ',MXN:'$',BRL:'R$',JPY:'¥',KRW:'₩',INR:'₹'};
+const CURRENCY_SYMBOLS={USD:'$',GBP:'£',EUR:'€',CAD:'$',AUD:'$',CHF:'CHF ',NZD:'$',SGD:'$',HKD:'$',SEK:'kr ',NOK:'kr ',DKK:'kr ',PLN:'zł ',CZK:'Kč ',AED:'د.إ ',ZAR:'R ',MXN:'$',BRL:'R$',JPY:'¥',KRW:'₩',INR:'₹',CNY:'¥'};
 // Country -> currency, for auto-detect. Covers all 21 currencies in the selector.
 const COUNTRY_TO_CURRENCY={US:'USD',GB:'GBP',UK:'GBP',IE:'EUR',DE:'EUR',FR:'EUR',IT:'EUR',ES:'EUR',PT:'EUR',NL:'EUR',BE:'EUR',AT:'EUR',FI:'EUR',GR:'EUR',CY:'EUR',MT:'EUR',LU:'EUR',SK:'EUR',SI:'EUR',LT:'EUR',LV:'EUR',EE:'EUR',CA:'CAD',AU:'AUD',CH:'CHF',NZ:'NZD',SG:'SGD',HK:'HKD',SE:'SEK',NO:'NOK',DK:'DKK',PL:'PLN',CZ:'CZK',AE:'AED',ZA:'ZAR',MX:'MXN',BR:'BRL',JP:'JPY',KR:'KRW',IN:'INR'};
 // Timezone -> currency fallback, for browsers where locale has no region (e.g. en-US gives US via locale, but this covers more)
-const TIMEZONE_TO_CURRENCY={'America/New_York':'USD','America/Chicago':'USD','America/Denver':'USD','America/Los_Angeles':'USD','Europe/London':'GBP','Europe/Dublin':'EUR','Europe/Paris':'EUR','Europe/Berlin':'EUR','Europe/Rome':'EUR','Europe/Madrid':'EUR','Europe/Lisbon':'EUR','Europe/Amsterdam':'EUR','Europe/Brussels':'EUR','Europe/Vienna':'EUR','Europe/Helsinki':'EUR','Europe/Athens':'EUR','Europe/Nicosia':'EUR','Europe/Malta':'EUR','Europe/Luxembourg':'EUR','Europe/Bratislava':'EUR','Europe/Ljubljana':'EUR','Europe/Vilnius':'EUR','Europe/Riga':'EUR','Europe/Tallinn':'EUR','America/Toronto':'CAD','America/Vancouver':'CAD','Australia/Sydney':'AUD','Australia/Melbourne':'AUD','Europe/Zurich':'CHF','Pacific/Auckland':'NZD','Asia/Singapore':'SGD','Asia/Hong_Kong':'HKD','Europe/Stockholm':'SEK','Europe/Oslo':'NOK','Europe/Copenhagen':'DKK','Europe/Warsaw':'PLN','Europe/Prague':'CZK','Asia/Dubai':'AED','Africa/Johannesburg':'ZAR','America/Mexico_City':'MXN','America/Sao_Paulo':'BRL','Asia/Tokyo':'JPY','Asia/Seoul':'KRW','Asia/Kolkata':'INR','Asia/Calcutta':'INR'};
+const TIMEZONE_TO_CURRENCY={'America/New_York':'USD','America/Chicago':'USD','America/Denver':'USD','America/Los_Angeles':'USD','Europe/London':'GBP','Europe/Dublin':'EUR','Europe/Paris':'EUR','Europe/Berlin':'EUR','Europe/Rome':'EUR','Europe/Madrid':'EUR','Europe/Lisbon':'EUR','Europe/Amsterdam':'EUR','Europe/Brussels':'EUR','Europe/Vienna':'EUR','Europe/Helsinki':'EUR','Europe/Athens':'EUR','Europe/Nicosia':'EUR','Asia/Nicosia':'EUR','Asia/Famagusta':'EUR','Europe/Malta':'EUR','Europe/Luxembourg':'EUR','Europe/Bratislava':'EUR','Europe/Ljubljana':'EUR','Europe/Vilnius':'EUR','Europe/Riga':'EUR','Europe/Tallinn':'EUR','America/Toronto':'CAD','America/Vancouver':'CAD','Australia/Sydney':'AUD','Australia/Melbourne':'AUD','Europe/Zurich':'CHF','Pacific/Auckland':'NZD','Asia/Singapore':'SGD','Asia/Hong_Kong':'HKD','Europe/Stockholm':'SEK','Europe/Oslo':'NOK','Europe/Copenhagen':'DKK','Europe/Warsaw':'PLN','Europe/Prague':'CZK','Asia/Dubai':'AED','Africa/Johannesburg':'ZAR','America/Mexico_City':'MXN','America/Sao_Paulo':'BRL','Asia/Tokyo':'JPY','Asia/Seoul':'KRW','Asia/Kolkata':'INR','Asia/Calcutta':'INR'};
 function detectLocalCurrency(){
   try{
-    // 1) Locale -> region -> currency. e.g. en-GB -> GB -> GBP, fr-FR -> FR -> EUR
+    // 1) TIMEZONE FIRST - this is actual location. Locale is just language preference.
+    // e.g. en-US browser in Cyprus should give EUR, not USD.
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && TIMEZONE_TO_CURRENCY[tz]) return {code: TIMEZONE_TO_CURRENCY[tz], source: 'timezone'};
+  }catch(e){}
+  try{
+    // 2) Locale -> region -> currency. e.g. en-GB -> GB -> GBP, fr-FR -> FR -> EUR
     if (typeof Intl !== 'undefined' && Intl.Locale) {
       const loc = new Intl.Locale(navigator.language || 'en-US');
       const region = (loc.maximize && loc.maximize().region) || loc.region;
@@ -364,15 +529,10 @@ function detectLocalCurrency(){
     }
   }catch(e){}
   try{
-    // 2) Timezone -> currency
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (tz && TIMEZONE_TO_CURRENCY[tz]) return {code: TIMEZONE_TO_CURRENCY[tz], source: 'timezone'};
-  }catch(e){}
-  try{
     // 3) Language tag fallback: en-GB, de-DE, etc.
     const lang = (navigator.language || '').toUpperCase();
-    const m = lang.match(/-([A-Z]{2})$/);
-    if (m && COUNTRY_TO_CURRENCY[m[1]]) return {code: COUNTRY_TO_CURRENCY[m[1]], source: 'language'};
+    const mm = lang.match(/-([A-Z]{2})$/);
+    if (mm && COUNTRY_TO_CURRENCY[mm[1]]) return {code: COUNTRY_TO_CURRENCY[mm[1]], source: 'language'};
   }catch(e){}
   return {code: 'EUR', source: 'default'};
 }
@@ -407,6 +567,8 @@ document.querySelectorAll('#presetRow .preset').forEach(p=>{
 // No currency choices - single auto-detected currency only, no click handlers.
 // No More dropdown - single currency only.
 renderDonation();
+initCalcCurrencySelector();
+calc();
 
 donateBtn.addEventListener('click', async ()=>{
   if (window.va) { try{ window.va('event',{name:'donation_click', amount: donationAmount, currency: donationCurrency}); }catch(e){} }
